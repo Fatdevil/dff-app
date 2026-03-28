@@ -18,6 +18,7 @@ class Store {
     this.chats = [];
     this.messages = [];
     this.currentUserId = null;
+    this.currentUserName = null;
     this.listeners = {};
     this.reminders = [];
     this.reminderTimers = new Map();
@@ -102,7 +103,7 @@ class Store {
 
       // Re-login if we have a userId
       if (this.currentUserId) {
-        socket.emit('login', this.currentUserId);
+        socket.emit('login', { userId: this.currentUserId, displayName: this.currentUserName || this.currentUserId });
       }
     });
 
@@ -308,8 +309,9 @@ class Store {
 
   switchUser(userId, displayName) {
     this.currentUserId = userId;
+    this.currentUserName = displayName || userId;
     socket.connect();
-    socket.emit('login', { userId, displayName: displayName || userId });
+    socket.emit('login', { userId, displayName: this.currentUserName });
   }
 
   pairWithUser(partnerName) {
