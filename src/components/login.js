@@ -1,10 +1,13 @@
 // ============================================
-// DFF! – Login Screen
+// DFF! – Login Screen (Real Users)
 // ============================================
 
 import { store } from '../store.js';
 
 export function renderLogin(container) {
+  // Check if user is saved in localStorage
+  const savedUser = localStorage.getItem('dff-username');
+
   container.innerHTML = `
     <div class="screen login-screen">
       <div class="login-logo">
@@ -13,36 +16,59 @@ export function renderLogin(container) {
         <p>Don't Freaking Forget</p>
       </div>
 
-      <p class="login-subtitle">Välj vem du är:</p>
-
-      <div class="login-users" id="login-users">
-        <button class="login-user-btn" data-user="alex" id="login-alex">
-          <div class="login-avatar alex">A</div>
-          <div class="login-user-info">
-            <span class="name">Alex</span>
-            <span class="status">Online</span>
-          </div>
-        </button>
-        <button class="login-user-btn" data-user="sam" id="login-sam">
-          <div class="login-avatar sam">S</div>
-          <div class="login-user-info">
-            <span class="name">Sam</span>
-            <span class="status">Online</span>
-          </div>
+      <div class="login-form">
+        <label class="login-label">Ditt namn</label>
+        <input 
+          type="text" 
+          class="login-input" 
+          id="login-name" 
+          placeholder="T.ex. Stellan, Lisa..." 
+          value="${savedUser || ''}" 
+          autocomplete="off" 
+          maxlength="20"
+        />
+        <button class="login-submit-btn" id="login-submit" ${savedUser ? '' : 'disabled'}>
+          🚀 Starta DFF!
         </button>
       </div>
 
       <p class="login-demo-note">
-        Demo-läge: byt mellan användare för att testa meddelanden och alarm
+        Skriv ditt namn → dela länken med din sambo → börja skicka alarm! 🔔
       </p>
     </div>
   `;
 
-  container.querySelectorAll('.login-user-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const userId = btn.dataset.user;
-      store.switchUser(userId);
-      store.emit('navigate', 'chatList');
-    });
+  const nameInput = document.getElementById('login-name');
+  const submitBtn = document.getElementById('login-submit');
+
+  nameInput?.addEventListener('input', () => {
+    submitBtn.disabled = !nameInput.value.trim();
   });
+
+  nameInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && nameInput.value.trim()) {
+      doLogin(nameInput.value.trim());
+    }
+  });
+
+  submitBtn?.addEventListener('click', () => {
+    if (nameInput.value.trim()) {
+      doLogin(nameInput.value.trim());
+    }
+  });
+
+  // Auto-focus
+  nameInput?.focus();
+  if (savedUser) nameInput?.select();
+
+  function doLogin(name) {
+    const userId = name.toLowerCase().replace(/[^a-zåäö0-9]/g, '');
+    if (!userId) return;
+
+    localStorage.setItem('dff-username', name);
+    localStorage.setItem('dff-userid', userId);
+
+    store.switchUser(userId, name);
+    store.emit('navigate', 'chatList');
+  }
 }

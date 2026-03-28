@@ -122,6 +122,14 @@ class Store {
       });
     });
 
+    socket.on('chatCreated', (chatData) => {
+      // Add new chat if not already present
+      if (!this.chats.find(c => c.id === chatData.id)) {
+        this.chats.push(chatData);
+      }
+      this.emit('chatsUpdated', {});
+    });
+
     socket.on('chatMessages', ({ chatId, messages }) => {
       // Replace messages for this chat
       this.messages = this.messages.filter(m => m.chatId !== chatId);
@@ -298,10 +306,16 @@ class Store {
     return this.users.find(u => u.id === otherId);
   }
 
-  switchUser(userId) {
+  switchUser(userId, displayName) {
     this.currentUserId = userId;
     socket.connect();
-    socket.emit('login', userId);
+    socket.emit('login', { userId, displayName: displayName || userId });
+  }
+
+  pairWithUser(partnerName) {
+    const partnerId = partnerName.toLowerCase().replace(/[^a-zåäö0-9]/g, '');
+    if (!partnerId || partnerId === this.currentUserId) return;
+    socket.emit('pairWith', partnerId);
   }
 
   // --- Chat Management ---

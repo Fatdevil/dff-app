@@ -2198,3 +2198,96 @@ input {
   background: rgba(52, 199, 89, 0.15); color: #2d8a4e;
   border-radius: 10px; font-weight: 600;
 }
+
+/* ============================================
+   ADD PERSON & PAIR DIALOG
+   ============================================ */
+
+.add-person-btn {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 14px var(--spacing-md);
+  background: linear-gradient(135deg, rgba(52, 199, 89, 0.06), rgba(48, 209, 88, 0.06));
+  border-bottom: 1px solid var(--border-light);
+  transition: background var(--transition-fast);
+}
+.add-person-btn:hover { background: rgba(52, 199, 89, 0.12); }
+.add-person-icon {
+  width: 44px; height: 44px; border-radius: var(--radius-full);
+  background: linear-gradient(135deg, #34c759, #30d158);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; color: white;
+}
+.add-person-text { font-size: 15px; font-weight: 600; color: #34c759; }
+
+.pair-dialog {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 1500; display: flex;
+  align-items: flex-end; justify-content: center;
+}
+.pair-backdrop {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4); backdrop-filter: blur(4px);
+}
+.pair-content {
+  position: relative; z-index: 1;
+  width: 100%; max-width: var(--app-max-width);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: var(--spacing-lg);
+  animation: slideUp var(--transition-normal) ease-out;
+}
+.pair-title { font-size: 20px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+.pair-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: var(--spacing-md); }
+.pair-input {
+  width: 100%; padding: 12px 16px;
+  border: 2px solid var(--border-light); border-radius: var(--radius-sm);
+  font-size: 16px; font-family: var(--font-ui);
+  color: var(--text-primary); background: var(--bg-primary);
+  margin-bottom: var(--spacing-md);
+}
+.pair-input:focus { border-color: #34c759; outline: none; }
+.pair-buttons { display: flex; gap: var(--spacing-sm); }
+.pair-cancel {
+  flex: 1; padding: 12px; border-radius: var(--radius-sm);
+  font-size: 15px; font-weight: 600;
+  color: var(--text-secondary); background: var(--bg-primary);
+}
+.pair-confirm {
+  flex: 2; padding: 12px; border-radius: var(--radius-sm);
+  font-size: 15px; font-weight: 700;
+  color: white; background: #34c759;
+}
+.pair-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.empty-state-hint {
+  font-size: 13px; color: var(--text-secondary); margin-top: 4px;
+}
+
+/* Login form */
+.login-form {
+  display: flex; flex-direction: column; gap: var(--spacing-sm);
+  padding: 0 var(--spacing-lg); width: 100%; max-width: 320px;
+}
+.login-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+.login-input {
+  width: 100%; padding: 14px 18px;
+  border: 2px solid var(--border-light); border-radius: var(--radius-md);
+  font-size: 18px; font-weight: 600; text-align: center;
+  font-family: var(--font-ui); color: var(--text-primary);
+  background: var(--bg-card);
+}
+.login-input:focus { border-color: var(--color-accent); outline: none; }
+.login-submit-btn {
+  padding: 14px; border-radius: var(--radius-md);
+  font-size: 16px; font-weight: 700;
+  color: white; background: var(--color-normal);
+  transition: all var(--transition-fast);
+  margin-top: var(--spacing-xs);
+}
+.login-submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.login-submit-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+
+/* Extra avatar gradients */
+.gradient-3 { background: linear-gradient(135deg, #34c759, #30d158); }
+.gradient-4 { background: linear-gradient(135deg, #ff9500, #ff6b00); }
+.gradient-5 { background: linear-gradient(135deg, #af52de, #5856d6); }
