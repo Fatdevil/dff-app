@@ -9,6 +9,10 @@ import { renderComposer } from './composer.js';
 export function renderChatView(container, chatId) {
   const currentUser = store.getCurrentUser();
   const otherUser = store.getOtherUser(chatId);
+
+  // Load messages from server
+  store.loadChatMessages(chatId);
+
   const messages = store.getMessagesForChat(chatId);
 
   // Mark received messages as seen
@@ -201,11 +205,23 @@ function renderMessage(msg, currentUserId) {
 
   const scheduledClass = msg.status === 'scheduled' ? 'scheduled' : '';
 
+  // Location badge
+  let locationBadge = '';
+  if (msg.location) {
+    const loc = msg.location;
+    locationBadge = `
+      <div class="msg-location-badge">
+        📍 ${loc.address || `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`} (${loc.radius}m)
+      </div>
+    `;
+  }
+
   return `
     <div class="message ${direction} ${priorityClass} ${scheduledClass}">
       <div class="message-bubble">
         ${priorityLabel}
         <div class="message-text">${escapeHtml(msg.text)}</div>
+        ${locationBadge}
         <div class="message-meta">
           <span class="message-time">${formatTime(msg.timestamp)}</span>
           ${statusIcon ? `<span class="message-status-icon">${statusIcon}</span>` : ''}

@@ -3,12 +3,23 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "concurrently -n server,vite -c blue,green \"node --watch server/index.js\" \"vite\"",
+    "dev:client": "vite",
+    "dev:server": "node --watch server/index.js",
+    "build": "vite build && cd server && npm install --production",
+    "preview": "vite preview",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "vite": "^5.4.0"
   }
 }

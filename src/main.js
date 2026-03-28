@@ -111,7 +111,6 @@ store.on('messageScheduled', (msg) => {
 // Self-reminder triggered
 store.on('reminderTriggered', (reminder) => {
   if (store.settings.alarmEnabled) {
-    // Create a fake message object for the alarm overlay
     const alarmMsg = {
       id: reminder.id,
       text: reminder.text,
@@ -122,6 +121,32 @@ store.on('reminderTriggered', (reminder) => {
     showAlarmOverlay(alarmMsg);
   } else {
     showToast(`🔔 PÅMINNELSE: ${reminder.text}`);
+  }
+});
+
+// Location-based alarm: register geofence when receiving a location message
+import { geofenceTracker } from './utils/geofence.js';
+
+store.on('messageDelivered', ({ message }) => {
+  if (message.location && message.senderId !== store.currentUserId) {
+    const loc = message.location;
+    geofenceTracker.addFence(
+      message.id,
+      loc.lat, loc.lng, loc.radius,
+      ({ distance }) => {
+        showToast(`📍 Du är nära "${loc.address || 'målpunkten'}"!`);
+        if (store.settings.alarmEnabled) {
+          showAlarmOverlay({
+            id: message.id,
+            text: `📍 PLATS-ALARM: ${message.text}\n\n📍 ${loc.address || 'Plats nådd'} (${Math.round(distance)}m)`,
+            priority: 'alarm',
+            senderId: message.senderId,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    );
+    showToast(`📍 GPS-bevakning aktiverad – ${loc.address || 'plats'} (${loc.radius}m radie)`);
   }
 });
 

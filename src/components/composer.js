@@ -4,6 +4,8 @@
 
 import { store } from '../store.js';
 import { formatTime } from '../utils/time.js';
+import { parseNaturalLanguage } from '../utils/nlp.js';
+import { showLocationPicker } from './locationPicker.js';
 
 const PRIORITIES = [
   { id: 'normal', icon: '🔵', label: 'Normal', desc: 'Vanlig notis' },
@@ -36,7 +38,10 @@ export function renderComposer(container, chatId) {
   let dropdownOpen = false;
   let scheduledTime = null;
   let pickerOpen = false;
-  let selectedDate = null; // Date object for the selected day
+  let selectedDate = null;
+  let magicMode = false;
+  let nlpPreview = null;
+  let locationData = null; // { lat, lng, radius, address }
 
   function render() {
     const priority = PRIORITIES.find(p => p.id === currentPriority);
@@ -72,18 +77,37 @@ export function renderComposer(container, chatId) {
         </div>
         <input 
           type="text" 
-          class="composer-input" 
+          class="composer-input ${magicMode ? 'magic-active' : ''}" 
           id="message-input"
-          placeholder="${scheduledTime ? '⏰ Schemalagt meddelande...' : 'Skriv meddelande...'}" 
+          placeholder="${magicMode ? '✨ Skriv naturligt, t.ex. köp mjölk imorgon kl 16...' : scheduledTime ? '⏰ Schemalagt meddelande...' : 'Skriv meddelande...'}" 
           autocomplete="off"
         />
+        <button class="magic-btn ${magicMode ? 'active' : ''}" id="magic-toggle" title="Magic mode – AI tolkar tid & datum">
+          ✨
+        </button>
+        <button class="location-btn ${locationData ? 'active' : ''}" id="location-toggle" title="Plats-alarm">
+          📍
+        </button>
         <button class="schedule-btn ${scheduledTime ? 'active' : ''}" id="schedule-toggle" title="Schemalägg leverans">
           🕐
         </button>
         <button class="send-btn ${currentPriority}" id="send-btn" disabled>
-          ${scheduledTime ? '🕐' : '→'}
+          ${scheduledTime ? '🕐' : locationData ? '📍' : '→'}
         </button>
       </div>
+      ${magicMode && nlpPreview && nlpPreview.date ? `
+        <div class="magic-preview">
+          <span class="magic-preview-icon">✨</span>
+          <span class="magic-preview-text">${nlpPreview.summary}</span>
+          <span class="magic-preview-confidence">${nlpPreview.confidence}%</span>
+        </div>
+      ` : ''}
+      ${locationData ? `
+        <div class="location-bar">
+          <span class="location-bar-info">📍 Alarm vid <strong>${locationData.address || `${locationData.lat.toFixed(4)}, ${locationData.lng.toFixed(4)}`}</strong> (${locationData.radius}m radie)</span>
+          <button class="location-bar-clear" id="location-clear">✕</button>
+        </div>
+      ` : ''}
       ${scheduledTime ? `
         <div class="schedule-bar">
           <button class="schedule-bar-edit" id="schedule-bar-edit" title="Klicka för att ändra">
@@ -135,18 +159,48 @@ export function renderComposer(container, chatId) {
 
     input?.addEventListener('input', () => {
       sendBtn.disabled = !input.value.trim();
+      // Live NLP preview in magic mode
+      if (magicMode && input.value.trim()) {
+        nlpPreview = parseNaturalLanguage(input.value.trim());
+        // Update preview bar without full re-render
+        const previewEl = container.querySelector('.magic-preview');
+        if (nlpPreview.date) {
+          if (previewEl) {
+            previewEl.querySelector('.magic-preview-text').textContent = nlpPreview.summary;
+            previewEl.querySelector('.magic-preview-confidence').textContent = nlpPreview.confidence + '%';
+          } else {
+            render(); // Full re-render to show preview bar
+            const newInput = document.getElementById('message-input');
+            if (newInput) { newInput.value = input.value; newInput.disabled = false; }
+            document.getElementById('send-btn').disabled = false;
+          }
+        } else if (previewEl) {
+          previewEl.remove();
+        }
+      } else {
+        nlpPreview = null;
+      }
     });
 
     input?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && input.value.trim()) {
-        sendMessage(input.value.trim());
+        handleSend(input.value.trim());
       }
     });
 
     sendBtn?.addEventListener('click', () => {
-      if (input.value.trim()) {
-        sendMessage(input.value.trim());
+      const input = document.getElementById('message-input');
+      if (input?.value.trim()) {
+        handleSend(input.value.trim());
       }
+    });
+
+    // Magic mode toggle
+    document.getElementById('magic-toggle')?.addEventListener('click', () => {
+      magicMode = !magicMode;
+      nlpPreview = null;
+      render();
+      document.getElementById('message-input')?.focus();
     });
 
     priorityToggle?.addEventListener('click', () => {
@@ -265,6 +319,21 @@ export function renderComposer(container, chatId) {
       }
     });
 
+    // Location picker
+    document.getElementById('location-toggle')?.addEventListener('click', async () => {
+      const result = await showLocationPicker();
+      if (result) {
+        locationData = result;
+        render();
+        document.getElementById('message-input')?.focus();
+      }
+    });
+
+    document.getElementById('location-clear')?.addEventListener('click', () => {
+      locationData = null;
+      render();
+    });
+
     document.getElementById('schedule-clear')?.addEventListener('click', () => {
       scheduledTime = null;
       render();
@@ -285,6 +354,23 @@ export function renderComposer(container, chatId) {
 
     // Focus input (only if picker is not open)
     if (!pickerOpen) input?.focus();
+  }
+
+  function handleSend(text) {
+    if (magicMode && nlpPreview && nlpPreview.date) {
+      store.sendMessage(chatId, nlpPreview.task, currentPriority, nlpPreview.timestamp, locationData);
+      window.showToast?.(`✨ Tolkad: ${nlpPreview.summary}`);
+    } else {
+      store.sendMessage(chatId, text, currentPriority, scheduledTime, locationData);
+    }
+    if (locationData) {
+      window.showToast?.(`📍 Plats-alarm aktiverat – ${locationData.radius}m radie`);
+    }
+    currentPriority = 'normal';
+    scheduledTime = null;
+    nlpPreview = null;
+    locationData = null;
+    render();
   }
 
   function sendMessage(text) {
