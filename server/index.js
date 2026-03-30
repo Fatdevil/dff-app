@@ -96,8 +96,9 @@ function buildChatData(chatId, userId) {
 
 // Generate avatar color from username
 function getAvatarClass(userId) {
+  if (!userId) return 'gradient-1';
   const colors = ['gradient-1', 'gradient-2', 'gradient-3', 'gradient-4', 'gradient-5'];
-  const hash = userId.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const hash = String(userId).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
   return colors[hash % colors.length];
 }
 
@@ -107,8 +108,20 @@ io.on('connection', (socket) => {
 
   console.log(`🔌 Socket connected: ${socket.id}`);
 
-  // --- Login (with dynamic user creation) ---
-  socket.on('login', ({ userId, displayName }) => {
+  // --- Login (accepts both string 'userId' and object { userId, displayName }) ---
+  socket.on('login', (data) => {
+    let userId, displayName;
+    if (typeof data === 'string') {
+      userId = data;
+      displayName = data;
+    } else {
+      userId = data?.userId;
+      displayName = data?.displayName || data?.userId;
+    }
+    if (!userId) {
+      console.warn(`⚠️ Login failed: no userId provided`);
+      return;
+    }
     currentUserId = userId;
 
     // Create or update user
