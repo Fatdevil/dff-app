@@ -1,48 +1,39 @@
 // ============================================
 // DFF! – Service Worker
-// Caches app shell for offline use + handles
-// scheduled notification triggers
+// Network-first strategy to avoid stale cache
 // ============================================
 
-const CACHE_NAME = 'dff-v1';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/icon-512.png',
-];
+const CACHE_NAME = 'dff-v2';
 
-// Install – cache the app shell
+// Install – clear old caches immediately
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
-  );
   self.skipWaiting();
 });
 
-// Activate – clean up old caches
+// Activate – delete ALL old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys.map((key) => caches.delete(key))
       )
     )
   );
   self.clients.claim();
 });
 
-// Fetch – serve from cache first, fallback to network
+// Fetch – NETWORK FIRST, fall back to cache only if offline
 self.addEventListener('fetch', (event) => {
-  // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
+  // Never cache socket.io or API requests
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/socket.io') || url.pathname.startsWith('/api/')) return;
+
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      // Return cached if available, otherwise network
-      const fetchPromise = fetch(event.request).then((response) => {
-        // Cache successful responses
+    fetch(event.request)
+      .then((response) => {
+        // Cache successful responses for offline use
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -50,10 +41,11 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return response;
-      }).catch(() => cached);
-
-      return cached || fetchPromise;
-    })
+      })
+      .catch(() => {
+        // Offline fallback – try cache
+        return caches.match(event.request);
+      })
   );
 });
 
