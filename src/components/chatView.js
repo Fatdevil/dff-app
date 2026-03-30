@@ -119,10 +119,16 @@ export function renderChatView(container, chatId) {
     });
   });
 
-  // Listen for message changes
+  // Listen for message changes – ONLY update messages, not the composer
   const unsub = store.on('messagesChanged', (data) => {
     if (data.chatId === chatId) {
-      renderChatView(container, chatId);
+      const messagesContainer = document.getElementById('messages-container');
+      if (messagesContainer) {
+        const currentUser = store.getCurrentUser();
+        const chatMessages = store.getMessagesForChat(chatId) || [];
+        messagesContainer.innerHTML = chatMessages.map(msg => renderMessage(msg, currentUser.id)).join('');
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
     }
   });
 
