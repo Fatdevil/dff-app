@@ -67,7 +67,6 @@ export function renderChatList(container) {
   // Event listeners
   container.querySelectorAll('.chat-item').forEach(item => {
     item.addEventListener('click', () => {
-      store.emit('navigate', 'chatView');
       store.emit('openChat', item.dataset.chatId);
     });
   });
