@@ -7,12 +7,12 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "concurrently -n server,vite -c blue,green \"node --watch server/index.js\" \"vite\"",
+    "dev": "concurrently -n server,vite -c blue,green \"node --watch --env-file=server/.env server/index.js\" \"vite\"",
     "dev:client": "vite",
-    "dev:server": "node --watch server/index.js",
+    "dev:server": "node --watch --env-file=server/.env server/index.js",
     "build": "vite build && cd server && npm install --production",
     "preview": "vite preview",
-    "start": "node server/index.js"
+    "start": "node --env-file=server/.env server/index.js"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

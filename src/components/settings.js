@@ -8,6 +8,8 @@ export function renderSettings(container) {
   const s = store.settings;
   const presets = store.themePresets;
   const currentTheme = s.theme;
+  const currentUser = store.getCurrentUser();
+  const currentEmail = localStorage.getItem('dff-email') || '';
 
   container.innerHTML = `
     <div class="screen settings-screen">
@@ -110,8 +112,12 @@ export function renderSettings(container) {
         <div class="settings-group">
           <div class="settings-group-title">Konto</div>
           <div class="settings-item" id="switch-account">
-            <span class="settings-item-label">🔄 Byt användare</span>
-            <span style="color: var(--text-tertiary)">→</span>
+            <span class="settings-item-label">👤 ${currentUser?.name || ''}</span>
+            <span style="color: var(--text-tertiary); font-size:13px;">${currentEmail}</span>
+          </div>
+          <div class="settings-item" id="logout-btn" style="cursor:pointer;">
+            <span class="settings-item-label" style="color: var(--color-alarm);">🚪 Logga ut</span>
+            <span style="color: var(--color-alarm); opacity:0.6;">→</span>
           </div>
         </div>
 
@@ -170,6 +176,11 @@ export function renderSettings(container) {
   });
 
   document.getElementById('switch-account')?.addEventListener('click', () => {
+    store.emit('navigate', 'chatList');
+  });
+
+  document.getElementById('logout-btn')?.addEventListener('click', () => {
+    store.logout();
     store.emit('navigate', 'login');
   });
 }

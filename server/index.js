@@ -1,7 +1,7 @@
 // ============================================
 // DFF! – Don't Freaking Forget
 // Backend Server (Node.js + Socket.io)
-// Dynamic users + chat pairing
+// Email OTP + JWT + SQLite persistence
 // ============================================
 
 import express from 'express';
@@ -10,6 +10,18 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+
+import {
+  generateOtp, storeOtp, verifyOtp, sendOtpEmail,
+  createToken, verifyToken, normalizeEmail, emailToUserId,
+} from './auth.js';
+
+import {
+  upsertUser, getUserById, getAllUsers, rowToUser, rowToMessage,
+  createChat, chatExists, getChatsByUser, getChatParticipants,
+  insertMessage, getMessagesByChat, updateMessageStatus,
+  updateMessageSnooze, updateMessageScheduled, deleteMessage, getMessageById,
+} from './db.js';
 
 const app = express();
 app.use(cors());
@@ -20,38 +32,16 @@ const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
 });
 
-// ========== In-Memory Store ==========
-const users = new Map();     // userId -> { id, name, emoji, avatarClass }
-const chats = new Map();     // chatId -> { id, participants: [userId, userId] }
-const messages = [];         // Array of message objects
-
-// Timer maps
-const scheduleTimers = new Map();
-const snoozeTimers = new Map();
-
-// Track connected users: userId -> Set<socketId>
-const connectedUsers = new Map();
+// ========== In-memory (timers only – ej persistent data) ==========
+const scheduleTimers = new Map();   // messageId -> timeoutId
+const snoozeTimers = new Map();     // messageId -> timeoutId
+const connectedUsers = new Map();   // userId -> Set<socketId>
 
 // ========== Helper Functions ==========
-function getSocketsForUser(userId) {
-  return connectedUsers.get(userId) || new Set();
-}
-
-function emitToUser(userId, event, data) {
-  const sockets = getSocketsForUser(userId);
-  sockets.forEach(socketId => {
-    io.to(socketId).emit(event, data);
-  });
-}
-
-function emitToChatParticipants(chatId, event, data, excludeUserId = null) {
-  const chat = chats.get(chatId);
-  if (!chat) return;
-  chat.participants.forEach(userId => {
-    if (userId !== excludeUserId) {
-      emitToUser(userId, event, data);
-    }
-  });
+function getAvatarClass(userId) {
+  const colors = ['gradient-1', 'gradient-2', 'gradient-3', 'gradient-4', 'gradient-5'];
+  const hash = String(userId).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  return colors[hash % colors.length];
 }
 
 function generateId(prefix = 'msg') {
@@ -59,339 +49,321 @@ function generateId(prefix = 'msg') {
 }
 
 function getChatIdForPair(userId1, userId2) {
-  const sorted = [userId1, userId2].sort();
-  return `chat-${sorted[0]}-${sorted[1]}`;
+  return `chat-${[userId1, userId2].sort().join('-')}`;
 }
 
-function getMessagesForChat(chatId, userId) {
-  return messages
+function emitToUser(userId, event, data) {
+  const sockets = connectedUsers.get(userId) || new Set();
+  sockets.forEach(sid => io.to(sid).emit(event, data));
+}
+
+function getParticipantIds(chatId) {
+  return getChatParticipants.all(chatId).map(r => r.user_id);
+}
+
+function emitToChatParticipants(chatId, event, data, excludeUserId = null) {
+  getParticipantIds(chatId).forEach(uid => {
+    if (uid !== excludeUserId) emitToUser(uid, event, data);
+  });
+}
+
+function getMessagesForUser(chatId, requestingUserId) {
+  const rows = getMessagesByChat.all(chatId);
+  return rows
+    .map(rowToMessage)
     .filter(m => {
-      if (m.chatId !== chatId) return false;
-      if (m.scheduledFor && m.scheduledFor > Date.now() && m.senderId !== userId) return false;
+      if (m.scheduledFor && m.scheduledFor > Date.now() && m.senderId !== requestingUserId) return false;
       return true;
-    })
-    .sort((a, b) => a.timestamp - b.timestamp);
+    });
 }
 
 function buildChatData(chatId, userId) {
-  const chat = chats.get(chatId);
-  if (!chat) return null;
-  const msgs = getMessagesForChat(chatId, userId);
+  const participants = getParticipantIds(chatId);
+  if (!participants.includes(userId)) return null;
+  const msgs = getMessagesForUser(chatId, userId);
   const lastMsg = msgs[msgs.length - 1] || null;
   const unread = msgs.filter(m =>
     m.senderId !== userId && (m.status === 'sent' || m.status === 'delivered')
   ).length;
-  const otherId = chat.participants.find(p => p !== userId);
-  const otherUser = users.get(otherId) || { id: otherId, name: otherId, emoji: '👤' };
-  const snoozedMsg = msgs.find(m => m.status === 'snoozed' && m.snoozedBy === userId);
-
-  return {
-    ...chat,
-    lastMessage: lastMsg,
-    unreadCount: unread,
-    otherUser,
-    snoozedMessage: snoozedMsg,
-  };
+  const otherId = participants.find(p => p !== userId);
+  const otherRow = otherId ? getUserById.get(otherId) : null;
+  const otherUser = otherRow ? rowToUser(otherRow) : { id: otherId, name: otherId, emoji: '👤' };
+  const snoozedMessage = msgs.find(m => m.status === 'snoozed' && m.snoozedBy === userId) || null;
+  return { id: chatId, participants, lastMessage: lastMsg, unreadCount: unread, otherUser, snoozedMessage };
 }
 
-// Generate avatar color from username
-function getAvatarClass(userId) {
-  if (!userId) return 'gradient-1';
-  const colors = ['gradient-1', 'gradient-2', 'gradient-3', 'gradient-4', 'gradient-5'];
-  const hash = String(userId).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  return colors[hash % colors.length];
-}
+// ========== REST API – Auth ==========
 
-// ========== Socket.io Connection ==========
+app.post('/api/auth/send-otp', async (req, res) => {
+  const { email } = req.body;
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({ ok: false, error: 'Ange en giltig e-postadress' });
+  }
+  const normalizedEmail = normalizeEmail(email);
+  const code = generateOtp();
+  const stored = storeOtp(normalizedEmail, code);
+  if (!stored.ok) return res.status(429).json({ ok: false, error: stored.error });
+  const sent = await sendOtpEmail(normalizedEmail, code);
+  if (!sent.ok) return res.status(500).json({ ok: false, error: sent.error });
+  console.log(`📧 OTP skickad till ${normalizedEmail}${sent.dev ? ' (dev)' : ''}`);
+  res.json({ ok: true, dev: sent.dev || false });
+});
+
+app.post('/api/auth/verify-otp', (req, res) => {
+  const { email, code, displayName } = req.body;
+  if (!email || !code) return res.status(400).json({ ok: false, error: 'E-post och kod krävs' });
+  const normalizedEmail = normalizeEmail(email);
+  const result = verifyOtp(normalizedEmail, code);
+  if (!result.ok) return res.status(401).json({ ok: false, error: result.error });
+
+  const userId = emailToUserId(normalizedEmail);
+  const name = (displayName || '').trim() || normalizedEmail.split('@')[0];
+
+  upsertUser.run({
+    id: userId,
+    email: normalizedEmail,
+    name,
+    emoji: '👤',
+    avatarClass: getAvatarClass(userId),
+  });
+
+  const token = createToken({ userId, email: normalizedEmail, displayName: name });
+  const user = rowToUser(getUserById.get(userId));
+  console.log(`🔑 Inloggad: ${name} (${normalizedEmail})`);
+  res.json({ ok: true, token, user });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const token = (req.headers.authorization || '').replace('Bearer ', '');
+  if (!token) return res.status(401).json({ ok: false });
+  const result = verifyToken(token);
+  if (!result.ok) return res.status(401).json({ ok: false, error: result.error });
+  const user = rowToUser(getUserById.get(result.payload.userId));
+  res.json({ ok: true, user, payload: result.payload });
+});
+
+// ========== Socket.io ==========
 io.on('connection', (socket) => {
   let currentUserId = null;
 
-  console.log(`🔌 Socket connected: ${socket.id}`);
-
-  // --- Login (accepts both string 'userId' and object { userId, displayName }) ---
   socket.on('login', (data) => {
-    let userId, displayName;
-    if (typeof data === 'string') {
-      userId = data;
-      displayName = data;
-    } else {
-      userId = data?.userId;
-      displayName = data?.displayName || data?.userId;
-    }
-    if (!userId) {
-      console.warn(`⚠️ Login failed: no userId provided`);
-      return;
-    }
+    const token = typeof data === 'string' ? data : data?.token;
+    const displayName = data?.displayName;
+    if (!token) { socket.emit('loginError', { error: 'Token saknas' }); return; }
+
+    const result = verifyToken(token);
+    if (!result.ok) { socket.emit('loginError', { error: 'Sessionen har gått ut' }); return; }
+
+    const { userId, email, displayName: tokenName } = result.payload;
+    const name = displayName || tokenName || email;
     currentUserId = userId;
 
-    // Create or update user
-    if (!users.has(userId)) {
-      users.set(userId, {
-        id: userId,
-        name: displayName || userId,
-        emoji: '👤',
-        avatarClass: getAvatarClass(userId),
-      });
-      console.log(`✨ New user registered: ${displayName} (${userId})`);
-    } else {
-      // Update display name if changed
-      users.get(userId).name = displayName || users.get(userId).name;
-    }
+    // Säkerställ att användaren finns i DB
+    upsertUser.run({ id: userId, email: email || '', name, emoji: '👤', avatarClass: getAvatarClass(userId) });
 
-    // Track socket
-    if (!connectedUsers.has(userId)) {
-      connectedUsers.set(userId, new Set());
-    }
+    if (!connectedUsers.has(userId)) connectedUsers.set(userId, new Set());
     connectedUsers.get(userId).add(socket.id);
 
-    // Build chat list for this user
-    const userChats = [];
-    for (const [chatId, chat] of chats) {
-      if (chat.participants.includes(userId)) {
-        const chatData = buildChatData(chatId, userId);
-        if (chatData) userChats.push(chatData);
-      }
-    }
+    // Bygg chattlista från DB
+    const chatRows = getChatsByUser.all(userId);
+    const userChats = chatRows.map(r => buildChatData(r.id, userId)).filter(Boolean);
 
-    // Check for pending alarm messages
-    const pendingAlarms = messages.filter(m =>
-      m.chatId &&
-      chats.has(m.chatId) &&
-      chats.get(m.chatId).participants.includes(userId) &&
-      m.senderId !== userId &&
-      m.priority === 'alarm' &&
-      m.status === 'sent' &&
-      !m.scheduledFor
-    );
+    // Väntande alarm
+    const pendingAlarms = userChats
+      .flatMap(c => getMessagesForUser(c.id, userId))
+      .filter(m => m.senderId !== userId && m.priority === 'alarm' && m.status === 'sent' && !m.scheduledFor);
 
     socket.emit('loginSuccess', {
-      user: users.get(userId),
-      users: Array.from(users.values()),
+      user: rowToUser(getUserById.get(userId)),
+      users: getAllUsers.all().map(rowToUser),
       chats: userChats,
       pendingAlarms,
     });
 
-    console.log(`👤 ${displayName || userId} logged in (${connectedUsers.get(userId).size} sessions)`);
+    console.log(`👤 ${name} inloggad (${userId})`);
   });
 
-  // --- Pair with another user ---
+  // --- Para ihop med annan användare ---
   socket.on('pairWith', (partnerId) => {
-    if (!currentUserId) return;
-
+    if (!currentUserId || !partnerId || typeof partnerId !== 'string' || partnerId.length > 100) return;
     const chatId = getChatIdForPair(currentUserId, partnerId);
 
-    // Create partner user if they haven't logged in yet
-    if (!users.has(partnerId)) {
-      users.set(partnerId, {
-        id: partnerId,
-        name: partnerId,
-        emoji: '👤',
-        avatarClass: getAvatarClass(partnerId),
-      });
+    if (!chatExists.get(chatId)) {
+      // Skapa partner-användare om de inte finns
+      if (!getUserById.get(partnerId)) {
+        upsertUser.run({ id: partnerId, email: '', name: partnerId, emoji: '👤', avatarClass: getAvatarClass(partnerId) });
+      }
+      createChat(chatId, currentUserId, partnerId);
+      console.log(`💬 Ny chatt: ${currentUserId} ↔ ${partnerId}`);
     }
 
-    // Create chat if not exists
-    if (!chats.has(chatId)) {
-      chats.set(chatId, {
-        id: chatId,
-        participants: [currentUserId, partnerId],
-      });
-      console.log(`💬 New chat created: ${currentUserId} ↔ ${partnerId}`);
-    }
-
-    // Send chat data to current user
-    const chatData = buildChatData(chatId, currentUserId);
-    socket.emit('chatCreated', chatData);
-
-    // Also notify partner if online
-    const partnerChatData = buildChatData(chatId, partnerId);
-    emitToUser(partnerId, 'chatCreated', partnerChatData);
+    socket.emit('chatCreated', buildChatData(chatId, currentUserId));
+    emitToUser(partnerId, 'chatCreated', buildChatData(chatId, partnerId));
   });
 
-  // --- Load Chat Messages ---
+  // --- Hämta meddelanden ---
   socket.on('loadMessages', (chatId) => {
     if (!currentUserId) return;
-    const msgs = getMessagesForChat(chatId, currentUserId);
-    socket.emit('chatMessages', { chatId, messages: msgs });
+    if (!getParticipantIds(chatId).includes(currentUserId)) return;
+    socket.emit('chatMessages', { chatId, messages: getMessagesForUser(chatId, currentUserId) });
   });
 
-  // --- Send Message ---
+  // --- Skicka meddelande ---
   socket.on('sendMessage', ({ chatId, text, priority, scheduledFor, location }) => {
     if (!currentUserId) return;
+    if (!text || typeof text !== 'string' || text.trim().length === 0 || text.length > 2000) return;
+    if (!getParticipantIds(chatId).includes(currentUserId)) return;
 
+    const safePriority = ['normal', 'important', 'alarm'].includes(priority) ? priority : 'normal';
     const isScheduled = scheduledFor && scheduledFor > Date.now();
+    const safeLocation = location && typeof location.lat === 'number' ? location : null;
+
     const msg = {
       id: generateId(),
       chatId,
       senderId: currentUserId,
-      text,
-      priority: priority || 'normal',
-      timestamp: Date.now(),
+      text: text.trim(),
+      priority: safePriority,
       status: isScheduled ? 'scheduled' : 'sent',
+      timestamp: Date.now(),
       scheduledFor: isScheduled ? scheduledFor : null,
       snoozeUntil: null,
       snoozedBy: null,
-      location: location || null,
+      location: safeLocation,
     };
-    messages.push(msg);
+
+    insertMessage.run({
+      id: msg.id,
+      chatId: msg.chatId,
+      senderId: msg.senderId,
+      text: msg.text,
+      priority: msg.priority,
+      status: msg.status,
+      timestamp: msg.timestamp,
+      scheduledFor: msg.scheduledFor,
+      locationLat: safeLocation?.lat ?? null,
+      locationLng: safeLocation?.lng ?? null,
+      locationRadius: safeLocation?.radius ?? null,
+      locationAddress: safeLocation?.address ?? null,
+    });
 
     if (isScheduled) {
-      const delay = scheduledFor - Date.now();
-      const timerId = setTimeout(() => deliverScheduledMessage(msg.id), delay);
-      scheduleTimers.set(msg.id, timerId);
+      const delay = Math.max(0, scheduledFor - Date.now());
+      scheduleTimers.set(msg.id, setTimeout(() => deliverScheduledMessage(msg.id), delay));
       emitToUser(currentUserId, 'messageScheduled', msg);
       emitToUser(currentUserId, 'messagesChanged', { chatId });
     } else {
-      const chat = chats.get(chatId);
-      if (chat) {
-        chat.participants.forEach(userId => {
-          emitToUser(userId, 'newMessage', msg);
-          emitToUser(userId, 'messagesChanged', { chatId });
-        });
-      }
-    }
-
-    const senderName = users.get(currentUserId)?.name || currentUserId;
-    const locInfo = location ? ` 📍 ${location.address || 'plats'}` : '';
-    console.log(`💬 ${senderName} → "${text.slice(0, 30)}..." [${priority}]${locInfo}`);
-  });
-
-  // --- Scheduled Message Delivery ---
-  function deliverScheduledMessage(messageId) {
-    const msg = messages.find(m => m.id === messageId);
-    if (!msg || msg.status !== 'scheduled') return;
-    msg.status = 'sent';
-    msg.scheduledFor = null;
-    scheduleTimers.delete(messageId);
-    const chat = chats.get(msg.chatId);
-    if (chat) {
-      chat.participants.forEach(userId => {
-        emitToUser(userId, 'messageDelivered', { message: msg });
-        emitToUser(userId, 'messagesChanged', { chatId: msg.chatId });
+      getParticipantIds(chatId).forEach(uid => {
+        emitToUser(uid, 'newMessage', msg);
+        emitToUser(uid, 'messagesChanged', { chatId });
       });
     }
-    console.log(`📬 Scheduled message delivered: "${msg.text.slice(0, 30)}..."`);
+
+    console.log(`💬 ${getUserById.get(currentUserId)?.name || currentUserId}: "${text.slice(0, 40)}"`);
+  });
+
+  // --- Schemalagd leverans ---
+  function deliverScheduledMessage(messageId) {
+    const row = getMessageById.get(messageId);
+    if (!row || row.status !== 'scheduled') return;
+    updateMessageScheduled.run({ status: 'sent', id: messageId });
+    scheduleTimers.delete(messageId);
+    const msg = rowToMessage(getMessageById.get(messageId));
+    getParticipantIds(msg.chatId).forEach(uid => {
+      emitToUser(uid, 'messageDelivered', { message: msg });
+      emitToUser(uid, 'messagesChanged', { chatId: msg.chatId });
+    });
   }
 
-  // --- Cancel Scheduled Message ---
+  // --- Avbryt schemalagd ---
   socket.on('cancelScheduledMessage', (messageId) => {
-    const msg = messages.find(m => m.id === messageId);
-    if (!msg || msg.status !== 'scheduled' || msg.senderId !== currentUserId) return;
-    if (scheduleTimers.has(messageId)) {
-      clearTimeout(scheduleTimers.get(messageId));
-      scheduleTimers.delete(messageId);
-    }
-    const idx = messages.indexOf(msg);
-    if (idx > -1) messages.splice(idx, 1);
-    emitToUser(currentUserId, 'messageCancelled', { message: msg });
-    emitToUser(currentUserId, 'messagesChanged', { chatId: msg.chatId });
+    const row = getMessageById.get(messageId);
+    if (!row || row.status !== 'scheduled' || row.sender_id !== currentUserId) return;
+    if (scheduleTimers.has(messageId)) { clearTimeout(scheduleTimers.get(messageId)); scheduleTimers.delete(messageId); }
+    deleteMessage.run(messageId);
+    emitToUser(currentUserId, 'messageCancelled', { message: rowToMessage(row) });
+    emitToUser(currentUserId, 'messagesChanged', { chatId: row.chat_id });
   });
 
-  // --- Reschedule Message ---
-  socket.on('rescheduleMessage', ({ messageId, newScheduledFor }) => {
-    const msg = messages.find(m => m.id === messageId);
-    if (!msg || msg.status !== 'scheduled' || msg.senderId !== currentUserId) return;
-    if (scheduleTimers.has(messageId)) clearTimeout(scheduleTimers.get(messageId));
-    msg.scheduledFor = newScheduledFor;
-    const delay = newScheduledFor - Date.now();
-    const timerId = setTimeout(() => deliverScheduledMessage(msg.id), delay);
-    scheduleTimers.set(messageId, timerId);
-    emitToUser(currentUserId, 'messageRescheduled', { message: msg, newScheduledFor });
-    emitToUser(currentUserId, 'messagesChanged', { chatId: msg.chatId });
-  });
-
-  // --- Snooze Message ---
+  // --- Snooze ---
   socket.on('snoozeMessage', ({ messageId, durationMs }) => {
-    const msg = messages.find(m => m.id === messageId);
-    if (!msg) return;
+    const row = getMessageById.get(messageId);
+    if (!row) return;
+    if (!getParticipantIds(row.chat_id).includes(currentUserId)) return;
     const snoozeUntil = Date.now() + durationMs;
-    msg.status = 'snoozed';
-    msg.snoozeUntil = snoozeUntil;
-    msg.snoozedBy = currentUserId;
+    updateMessageSnooze.run({ status: 'snoozed', snoozeUntil, snoozedBy: currentUserId, id: messageId });
     if (snoozeTimers.has(messageId)) clearTimeout(snoozeTimers.get(messageId));
-    const timerId = setTimeout(() => triggerSnoozeReminder(messageId), durationMs);
-    snoozeTimers.set(messageId, timerId);
-    emitToChatParticipants(msg.chatId, 'messageUpdate', msg);
-    emitToChatParticipants(msg.chatId, 'messagesChanged', { chatId: msg.chatId });
+    snoozeTimers.set(messageId, setTimeout(() => triggerSnoozeReminder(messageId), durationMs));
+    const updated = rowToMessage(getMessageById.get(messageId));
+    emitToChatParticipants(row.chat_id, 'messageUpdate', updated);
+    emitToChatParticipants(row.chat_id, 'messagesChanged', { chatId: row.chat_id });
   });
 
   function triggerSnoozeReminder(messageId) {
-    const msg = messages.find(m => m.id === messageId);
-    if (!msg || msg.status !== 'snoozed') return;
-    msg.status = 'sent';
-    msg.snoozeUntil = null;
-    const snoozedBy = msg.snoozedBy;
-    msg.snoozedBy = null;
+    const row = getMessageById.get(messageId);
+    if (!row || row.status !== 'snoozed') return;
+    const snoozedBy = row.snoozed_by;
+    updateMessageSnooze.run({ status: 'sent', snoozeUntil: null, snoozedBy: null, id: messageId });
     snoozeTimers.delete(messageId);
+    const msg = rowToMessage(getMessageById.get(messageId));
     emitToUser(snoozedBy, 'snoozeReminder', { message: msg });
-    emitToChatParticipants(msg.chatId, 'messagesChanged', { chatId: msg.chatId });
-    console.log(`⏰ Snooze reminder triggered for "${msg.text.slice(0, 30)}..."`);
+    emitToChatParticipants(row.chat_id, 'messagesChanged', { chatId: row.chat_id });
   }
 
-  // --- Mark Seen ---
+  // --- Markera sedd ---
   socket.on('markSeen', (messageId) => {
-    const msg = messages.find(m => m.id === messageId);
-    if (msg && msg.status === 'sent') {
-      msg.status = 'seen';
-      emitToChatParticipants(msg.chatId, 'messageUpdate', msg);
-      emitToChatParticipants(msg.chatId, 'messagesChanged', { chatId: msg.chatId });
-    }
+    const row = getMessageById.get(messageId);
+    if (!row || row.status !== 'sent') return;
+    if (!getParticipantIds(row.chat_id).includes(currentUserId)) return;
+    updateMessageStatus.run({ status: 'seen', id: messageId });
+    const msg = rowToMessage(getMessageById.get(messageId));
+    emitToChatParticipants(row.chat_id, 'messageUpdate', msg);
+    emitToChatParticipants(row.chat_id, 'messagesChanged', { chatId: row.chat_id });
   });
 
-  // --- Mark Done ---
+  // --- Markera klar ---
   socket.on('markDone', (messageId) => {
-    const msg = messages.find(m => m.id === messageId);
-    if (!msg) return;
-    if (snoozeTimers.has(messageId)) {
-      clearTimeout(snoozeTimers.get(messageId));
-      snoozeTimers.delete(messageId);
-    }
-    msg.status = 'done';
-    msg.snoozeUntil = null;
-    emitToChatParticipants(msg.chatId, 'messageUpdate', msg);
-    emitToChatParticipants(msg.chatId, 'messagesChanged', { chatId: msg.chatId });
+    const row = getMessageById.get(messageId);
+    if (!row) return;
+    if (!getParticipantIds(row.chat_id).includes(currentUserId)) return;
+    if (snoozeTimers.has(messageId)) { clearTimeout(snoozeTimers.get(messageId)); snoozeTimers.delete(messageId); }
+    updateMessageSnooze.run({ status: 'done', snoozeUntil: null, snoozedBy: null, id: messageId });
+    const msg = rowToMessage(getMessageById.get(messageId));
+    emitToChatParticipants(row.chat_id, 'messageUpdate', msg);
+    emitToChatParticipants(row.chat_id, 'messagesChanged', { chatId: row.chat_id });
   });
 
-  // --- Disconnect ---
+  // --- Frånkoppling ---
   socket.on('disconnect', () => {
     if (currentUserId && connectedUsers.has(currentUserId)) {
       connectedUsers.get(currentUserId).delete(socket.id);
-      if (connectedUsers.get(currentUserId).size === 0) {
-        connectedUsers.delete(currentUserId);
-      }
-      console.log(`👋 ${users.get(currentUserId)?.name || currentUserId} disconnected`);
+      if (connectedUsers.get(currentUserId).size === 0) connectedUsers.delete(currentUserId);
+      console.log(`👋 ${getUserById.get(currentUserId)?.name || currentUserId} frånkopplad`);
     }
   });
 });
 
-// ========== Static Files (Production) ==========
+// ========== Statiska filer ==========
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const distPath = join(__dirname, '..', 'dist');
 app.use(express.static(distPath));
 
-// ========== REST API ==========
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    app: 'DFF! Server',
-    users: users.size,
-    chats: chats.size,
-    messages: messages.length,
-    online: connectedUsers.size,
-    uptime: process.uptime(),
-  });
+  res.json({ status: 'ok', app: 'DFF!', online: connectedUsers.size, uptime: process.uptime() });
 });
 
-// SPA fallback
-app.get('*', (req, res) => {
-  res.sendFile(join(distPath, 'index.html'));
-});
+app.get('*', (req, res) => res.sendFile(join(distPath, 'index.html')));
 
-// ========== Start Server ==========
+// ========== Starta server ==========
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🔔 DFF! Server running on port ${PORT}`);
-  console.log(`📡 WebSocket ready for connections`);
-  console.log(`💚 Health: http://localhost:${PORT}/api/health\n`);
+  console.log(`\n🔔 DFF! Server på port ${PORT}`);
+  const gmailReady = process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD &&
+    process.env.GMAIL_APP_PASSWORD !== 'xxxx-xxxx-xxxx-xxxx';
+  if (!gmailReady) {
+    console.log(`⚠️  DEV-LÄGE: OTP loggas i terminalen\n`);
+  } else {
+    console.log(`📧 Gmail SMTP: ${process.env.GMAIL_USER}\n`);
+  }
 });

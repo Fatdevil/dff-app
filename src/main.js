@@ -166,7 +166,15 @@ function showToast(message) {
 window.showToast = showToast;
 
 // --- Initialize ---
-navigate('login');
+(async () => {
+  const loggedIn = await store.tryAutoLogin();
+  if (!loggedIn) {
+    navigate('login');
+  } else {
+    // tryAutoLogin verifierade JWT och anslöt socket – vänta på loginSuccess
+    // som triggas av socket-händelsen, och navigera sedan
+    navigate('chatList');
+  }
+})();
 
 console.log('🔔 DFF! – Don\'t Freaking Forget');
-console.log('📱 Demo-app initialiserad');

@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# DFF! – Hemligheter och lokal data (committas ALDRIG)
+server/.env
+server/data/

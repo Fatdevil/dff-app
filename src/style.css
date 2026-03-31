@@ -259,6 +259,146 @@ input {
   margin-top: var(--spacing-md);
 }
 
+/* --- OTP Login Form --- */
+.login-form {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.login-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+
+.login-input {
+  width: 100%;
+  height: 48px;
+  padding: 0 var(--spacing-md);
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 16px;
+  color: var(--text-primary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.login-input:focus {
+  border-color: var(--color-normal);
+  box-shadow: 0 0 0 3px rgba(52, 120, 246, 0.12);
+}
+
+.login-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Big OTP code input */
+.login-otp-input {
+  text-align: center;
+  font-size: 28px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 10px;
+  padding: 0 var(--spacing-md);
+  height: 64px;
+}
+
+.login-submit-btn {
+  width: 100%;
+  height: 50px;
+  background: var(--color-normal);
+  color: var(--text-inverse);
+  border-radius: var(--radius-md);
+  font-size: 16px;
+  font-weight: 700;
+  margin-top: var(--spacing-sm);
+  transition: all var(--transition-fast);
+  box-shadow: 0 4px 14px rgba(52, 120, 246, 0.3);
+}
+
+.login-submit-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(52, 120, 246, 0.4);
+}
+
+.login-submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.login-submit-btn:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.login-error {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-alarm);
+  background: var(--color-alarm-light);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-top: 2px;
+}
+
+.login-back-btn {
+  width: 100%;
+  height: 40px;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  transition: color var(--transition-fast);
+  margin-top: 4px;
+}
+
+.login-back-btn:hover {
+  color: var(--text-primary);
+}
+
+.login-resend {
+  text-align: center;
+  margin-top: var(--spacing-sm);
+}
+
+.login-resend-btn {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-normal);
+  text-decoration: underline;
+  background: none;
+  transition: opacity var(--transition-fast);
+}
+
+.login-resend-btn:hover {
+  opacity: 0.7;
+}
+
+#resend-timer {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.login-dev-note {
+  background: rgba(255, 149, 0, 0.12);
+  border: 1px solid rgba(255, 149, 0, 0.3);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 12px;
+  font-weight: 500;
+  color: #b86200;
+  text-align: center;
+  margin: 0 0 var(--spacing-sm);
+  width: 100%;
+  max-width: 320px;
+}
+
+
 /* ============================================
    HEADER
    ============================================ */

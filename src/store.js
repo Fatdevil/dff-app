@@ -101,10 +101,21 @@ class Store {
       this.emit('connectionChanged', true);
       console.log('🟢 Connected to server');
 
-      // Re-login if we have a userId
-      if (this.currentUserId) {
-        socket.emit('login', { userId: this.currentUserId, displayName: this.currentUserName || this.currentUserId });
+      // Re-login med JWT om vi har en token
+      const token = localStorage.getItem('dff-token');
+      if (token && this.currentUserId) {
+        socket.emit('login', { token, displayName: this.currentUserName });
       }
+    });
+
+    socket.on('loginError', ({ error }) => {
+      console.warn('🔴 Login error:', error);
+      // Token är ogiltig – tvinga omloggning
+      localStorage.removeItem('dff-token');
+      localStorage.removeItem('dff-userid');
+      this.currentUserId = null;
+      this.currentUserName = null;
+      this.emit('navigate', 'login');
     });
 
     socket.on('disconnect', () => {
@@ -295,6 +306,76 @@ class Store {
     return this.reminders.filter(r => r.userId === this.currentUserId && r.status === 'pending');
   }
 
+  // --- OTP Auth ---
+  async requestOtp(email) {
+    try {
+      const res = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      return await res.json();
+    } catch {
+      return { ok: false, error: 'Kunde inte nå servern' };
+    }
+  }
+
+  async verifyOtp(email, code, displayName) {
+    try {
+      const res = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code, displayName }),
+      });
+      const data = await res.json();
+      if (data.ok && data.token) {
+        localStorage.setItem('dff-token', data.token);
+        localStorage.setItem('dff-userid', data.user.id);
+        localStorage.setItem('dff-username', data.user.name);
+        localStorage.setItem('dff-email', email);
+        this.currentUserId = data.user.id;
+        this.currentUserName = data.user.name;
+        socket.connect();
+        socket.emit('login', { token: data.token, displayName: data.user.name });
+      }
+      return data;
+    } catch {
+      return { ok: false, error: 'Kunde inte nå servern' };
+    }
+  }
+
+  // Auto-login vid sidladdning om JWT finns
+  async tryAutoLogin() {
+    const token = localStorage.getItem('dff-token');
+    if (!token) return false;
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const { userId, displayName, email } = data.payload;
+        this.currentUserId = userId;
+        this.currentUserName = displayName || email;
+        socket.connect();
+        socket.emit('login', { token, displayName: this.currentUserName });
+        return true;
+      }
+    } catch { /* nät-fel – fortsätt till login */ }
+    localStorage.removeItem('dff-token');
+    return false;
+  }
+
+  logout() {
+    localStorage.removeItem('dff-token');
+    localStorage.removeItem('dff-userid');
+    localStorage.removeItem('dff-username');
+    localStorage.removeItem('dff-email');
+    this.currentUserId = null;
+    this.currentUserName = null;
+    socket.disconnect();
+  }
+
   // --- User Management ---
   getCurrentUser() {
     return this.users.find(u => u.id === this.currentUserId);
@@ -305,13 +386,6 @@ class Store {
     if (!chat) return null;
     const otherId = chat.participants.find(p => p !== this.currentUserId);
     return this.users.find(u => u.id === otherId);
-  }
-
-  switchUser(userId, displayName) {
-    this.currentUserId = userId;
-    this.currentUserName = displayName || userId;
-    socket.connect();
-    socket.emit('login', { userId, displayName: this.currentUserName });
   }
 
   pairWithUser(partnerName) {

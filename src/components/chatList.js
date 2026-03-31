@@ -86,8 +86,7 @@ export function renderChatList(container) {
   });
 
   document.getElementById('switch-user-btn')?.addEventListener('click', () => {
-    localStorage.removeItem('dff-username');
-    localStorage.removeItem('dff-userid');
+    store.logout();
     store.emit('navigate', 'login');
   });
 
