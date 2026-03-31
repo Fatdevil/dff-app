@@ -80,19 +80,17 @@ export async function sendOtpEmail(email, code) {
     const { createTransport } = await import('nodemailer');
     const transporter = createTransport({
       host: 'smtp.gmail.com',
-      port: 587,
-      secure: false, // STARTTLS
-      family: 4,     // Tvinga IPv4
+      port: 465,
+      secure: true, // SSL (port 465)
       auth: {
         user: gmailUser,
         pass: gmailPass,
       },
-      tls: {
-        rejectUnauthorized: false, // Hantera proxy-certifikat
-      },
+      connectionTimeout: 15000, // 15s
+      socketTimeout: 10000,     // 10s
     });
 
-    await transporter.sendMail({
+    const sendPromise = transporter.sendMail({
       from: `"DFF! 🔔" <${gmailUser}>`,
       to: email,
       subject: `${code} – Din DFF! inloggningskod`,
@@ -113,14 +111,19 @@ export async function sendOtpEmail(email, code) {
       `,
     });
 
+    // Timeout-skydd: max 20 sekunder innan vi ger upp
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('SMTP timeout efter 20s')), 20000)
+    );
+
+    await Promise.race([sendPromise, timeout]);
     console.log(`📧 OTP skickad till ${email} via Gmail`);
     return { ok: true };
   } catch (err) {
     console.error('Gmail SMTP error:', err.message);
-    return { ok: false, error: 'Kunde inte skicka e-post – kontrollera Gmail-inställningarna' };
+    return { ok: false, error: 'Kunde inte skicka e-post. Försök igen.' };
   }
 }
-
 
 // ========== JWT ==========
 export function createToken(payload) {
