@@ -65,63 +65,59 @@ export function verifyOtp(email, inputCode) {
   return { ok: true };
 }
 
-// ========== Skicka OTP via Gmail SMTP ==========
+// ========== Skicka OTP via Resend HTTP API ==========
 export async function sendOtpEmail(email, code) {
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  const apiKey = process.env.RESEND_API_KEY;
 
-  if (!gmailUser || !gmailPass || gmailPass === 'xxxx-xxxx-xxxx-xxxx') {
+  if (!apiKey) {
     // Dev-läge: logga koden istället för att skicka
     console.log(`\n🔑 DEV MODE – OTP för ${email}: ${code}\n`);
     return { ok: true, dev: true };
   }
 
   try {
-    const { createTransport } = await import('nodemailer');
-    const transporter = createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true, // SSL (port 465)
-      auth: {
-        user: gmailUser,
-        pass: gmailPass,
+    const fromEmail = process.env.FROM_EMAIL || 'onboarding@resend.dev';
+    const fromName  = process.env.FROM_NAME  || 'DFF!';
+
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
       },
-      connectionTimeout: 15000, // 15s
-      socketTimeout: 10000,     // 10s
+      body: JSON.stringify({
+        from: `${fromName} <${fromEmail}>`,
+        to: [email],
+        subject: `${code} – Din DFF! inloggningskod`,
+        html: `
+          <div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+            <div style="text-align: center; margin-bottom: 32px;">
+              <span style="font-size: 48px;">🔔</span>
+              <h1 style="font-size: 28px; font-weight: 700; margin: 8px 0 4px;">DFF!</h1>
+              <p style="color: #666; margin: 0;">Don't Freaking Forget</p>
+            </div>
+            <p style="color: #333; font-size: 16px;">Din inloggningskod:</p>
+            <div style="background: #f5f5f7; border-radius: 16px; padding: 24px; text-align: center; margin: 16px 0;">
+              <span style="font-size: 48px; font-weight: 700; letter-spacing: 8px; font-family: monospace; color: #1c1c1e;">${code}</span>
+            </div>
+            <p style="color: #666; font-size: 14px;">Koden gäller i <strong>10 minuter</strong>. Dela den inte med någon.</p>
+            <p style="color: #999; font-size: 12px; margin-top: 32px;">Om du inte begärt denna kod kan du ignorera mejlet.</p>
+          </div>
+        `,
+      }),
     });
 
-    const sendPromise = transporter.sendMail({
-      from: `"DFF! 🔔" <${gmailUser}>`,
-      to: email,
-      subject: `${code} – Din DFF! inloggningskod`,
-      html: `
-        <div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
-          <div style="text-align: center; margin-bottom: 32px;">
-            <span style="font-size: 48px;">🔔</span>
-            <h1 style="font-size: 28px; font-weight: 700; margin: 8px 0 4px;">DFF!</h1>
-            <p style="color: #666; margin: 0;">Don't Freaking Forget</p>
-          </div>
-          <p style="color: #333; font-size: 16px;">Din inloggningskod:</p>
-          <div style="background: #f5f5f7; border-radius: 16px; padding: 24px; text-align: center; margin: 16px 0;">
-            <span style="font-size: 48px; font-weight: 700; letter-spacing: 8px; font-family: monospace; color: #1c1c1e;">${code}</span>
-          </div>
-          <p style="color: #666; font-size: 14px;">Koden gäller i <strong>10 minuter</strong>. Dela den inte med någon.</p>
-          <p style="color: #999; font-size: 12px; margin-top: 32px;">Om du inte begärt denna kod kan du ignorera mejlet.</p>
-        </div>
-      `,
-    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('Resend error:', err);
+      return { ok: false, error: 'Kunde inte skicka e-post.' };
+    }
 
-    // Timeout-skydd: max 20 sekunder innan vi ger upp
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('SMTP timeout efter 20s')), 20000)
-    );
-
-    await Promise.race([sendPromise, timeout]);
-    console.log(`📧 OTP skickad till ${email} via Gmail`);
+    console.log(`📧 OTP skickad till ${email} via Resend`);
     return { ok: true };
   } catch (err) {
-    console.error('Gmail SMTP error:', err.message);
-    return { ok: false, error: 'Kunde inte skicka e-post. Försök igen.' };
+    console.error('Resend fetch error:', err.message);
+    return { ok: false, error: 'Nätverksfel vid e-postutskick.' };
   }
 }
 
