@@ -6,7 +6,23 @@ import { store } from '../store.js';
 import { formatTime, formatSnoozeUntil } from '../utils/time.js';
 import { showReminderDialog } from './reminderDialog.js';
 
+// Track active listeners to prevent leaks
+let _activeSubs = [];
+let _pairTimeout = null;
+
+function _cleanupAll() {
+  _activeSubs.forEach(fn => fn());
+  _activeSubs = [];
+  if (_pairTimeout) {
+    clearTimeout(_pairTimeout);
+    _pairTimeout = null;
+  }
+}
+
 export function renderChatList(container) {
+  // ALWAYS clean up old listeners first
+  _cleanupAll();
+
   const currentUser = store.getCurrentUser();
   const chats = store.getChatsForCurrentUser();
 
@@ -23,7 +39,6 @@ export function renderChatList(container) {
       </div>
 
       <div class="chat-list" id="chat-list">
-        <!-- Add person button -->
         <button class="add-person-btn" id="add-person-btn">
           <span class="add-person-icon">➕</span>
           <span class="add-person-text">Lägg till person</span>
@@ -38,7 +53,6 @@ export function renderChatList(container) {
         ` : chats.map(chat => renderChatItem(chat)).join('')}
       </div>
 
-      <!-- Pair dialog -->
       <div class="pair-dialog" id="pair-dialog" style="display:none;">
         <div class="pair-backdrop" id="pair-backdrop"></div>
         <div class="pair-content">
@@ -123,15 +137,28 @@ export function renderChatList(container) {
     store.pairWithUser(name);
     pairDialog.style.display = 'none';
     window.showToast?.(`🔗 Kopplad med ${name}!`);
-    // Re-render after a moment to show new chat
-    setTimeout(() => renderChatList(container), 500);
+    // No setTimeout re-render – chatsUpdated event handles it
   }
 
-  // Listen for changes
-  const unsub1 = store.on('messagesChanged', () => renderChatList(container));
-  const unsub2 = store.on('chatsUpdated', () => renderChatList(container));
+  // Store event listeners – tracked for cleanup
+  const unsub1 = store.on('messagesChanged', () => {
+    // Only re-render if we're still showing chatList
+    if (document.getElementById('chat-list')) {
+      renderChatList(container);
+    }
+  });
 
-  container._cleanup = () => { unsub1(); unsub2(); };
+  const unsub2 = store.on('chatsUpdated', () => {
+    // Only re-render if we're still showing chatList
+    if (document.getElementById('chat-list')) {
+      renderChatList(container);
+    }
+  });
+
+  _activeSubs.push(unsub1, unsub2);
+
+  // Also set container cleanup for navigate()
+  container._cleanup = _cleanupAll;
 }
 
 function renderChatItem(chat) {
