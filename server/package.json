@@ -12,6 +12,7 @@
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^8.0.4",
+    "pg": "^8.20.0",
     "resend": "^4.5.1",
     "socket.io": "^4.7.5"
   }
