@@ -5,12 +5,14 @@
 
 import './style.css';
 import { store } from './store.js';
+import { showToast } from './utils/toast.js';
 import { renderLogin } from './components/login.js';
 import { renderChatList } from './components/chatList.js';
 import { renderChatView } from './components/chatView.js';
 import { renderSettings } from './components/settings.js';
 import { showAlarmOverlay, hideAlarmOverlay } from './components/alarmOverlay.js';
 import { showSnoozeDialog, hideSnoozeDialog } from './components/snoozeDialog.js';
+import { geofenceTracker } from './utils/geofence.js';
 
 // --- App State ---
 let currentScreen = 'login';
@@ -89,6 +91,7 @@ store.on('snoozeReminder', ({ message }) => {
 });
 
 // Scheduled message delivered: trigger alarm for recipient
+// Also handles location-based geofence registration
 store.on('messageDelivered', ({ message }) => {
   // If the recipient is currently active, trigger alarm
   if (store.currentUserId !== message.senderId) {
@@ -96,6 +99,28 @@ store.on('messageDelivered', ({ message }) => {
       showAlarmOverlay(message);
     } else {
       showToast(`📬 Nytt meddelande: ${message.text}`);
+    }
+
+    // GPS geofence: register fence for location messages
+    if (message.location) {
+      const loc = message.location;
+      geofenceTracker.addFence(
+        message.id,
+        loc.lat, loc.lng, loc.radius,
+        ({ distance }) => {
+          showToast(`📍 Du är nära "${loc.address || 'målpunkten'}"!`);
+          if (store.settings.alarmEnabled) {
+            showAlarmOverlay({
+              id: message.id,
+              text: `📍 PLATS-ALARM: ${message.text}\n\n📍 ${loc.address || 'Plats nådd'} (${Math.round(distance)}m)`,
+              priority: 'alarm',
+              senderId: message.senderId,
+              timestamp: Date.now(),
+            });
+          }
+        }
+      );
+      showToast(`📍 GPS-bevakning aktiverad – ${loc.address || 'plats'} (${loc.radius}m radie)`);
     }
   } else {
     showToast(`✅ Schemalagt meddelande levererat!`);
@@ -123,48 +148,6 @@ store.on('reminderTriggered', (reminder) => {
     showToast(`🔔 PÅMINNELSE: ${reminder.text}`);
   }
 });
-
-// Location-based alarm: register geofence when receiving a location message
-import { geofenceTracker } from './utils/geofence.js';
-
-store.on('messageDelivered', ({ message }) => {
-  if (message.location && message.senderId !== store.currentUserId) {
-    const loc = message.location;
-    geofenceTracker.addFence(
-      message.id,
-      loc.lat, loc.lng, loc.radius,
-      ({ distance }) => {
-        showToast(`📍 Du är nära "${loc.address || 'målpunkten'}"!`);
-        if (store.settings.alarmEnabled) {
-          showAlarmOverlay({
-            id: message.id,
-            text: `📍 PLATS-ALARM: ${message.text}\n\n📍 ${loc.address || 'Plats nådd'} (${Math.round(distance)}m)`,
-            priority: 'alarm',
-            senderId: message.senderId,
-            timestamp: Date.now(),
-          });
-        }
-      }
-    );
-    showToast(`📍 GPS-bevakning aktiverad – ${loc.address || 'plats'} (${loc.radius}m radie)`);
-  }
-});
-
-// Toast utility
-function showToast(message) {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = message;
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.classList.add('out');
-    setTimeout(() => toast.remove(), 200);
-  }, 2500);
-}
-window.showToast = showToast;
-
 // --- Initialize ---
 (async () => {
   const loggedIn = await store.tryAutoLogin();

@@ -4,6 +4,8 @@
 
 import { store } from '../store.js';
 import { formatTime, formatSnoozeUntil, formatScheduleTime } from '../utils/time.js';
+import { escapeHtml } from '../utils/html.js';
+import { showToast } from '../utils/toast.js';
 import { renderComposer } from './composer.js';
 
 export function renderChatView(container, chatId) {
@@ -27,7 +29,7 @@ export function renderChatView(container, chatId) {
       <div class="header">
         <button class="header-back" id="chat-back-btn">←</button>
         <div class="header-title">
-          ${otherUser?.name || 'Chat'}
+          ${escapeHtml(otherUser?.name || 'Chat')}
           <div class="header-subtitle">Online</div>
         </div>
         <div class="header-actions">
@@ -239,21 +241,4 @@ function renderMessage(msg, currentUserId) {
   `;
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
 
-function showToast(message) {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = message;
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.classList.add('out');
-    setTimeout(() => toast.remove(), 200);
-  }, 2000);
-}

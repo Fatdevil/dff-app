@@ -4,6 +4,8 @@
 
 import { store } from '../store.js';
 import { formatTime, formatSnoozeUntil } from '../utils/time.js';
+import { escapeHtml } from '../utils/html.js';
+import { showToast } from '../utils/toast.js';
 import { showReminderDialog } from './reminderDialog.js';
 
 // Track active listeners to prevent leaks
@@ -31,7 +33,7 @@ export function renderChatList(container) {
       <div class="header">
         <div class="header-title">
           DFF!
-          <div class="header-subtitle">Inloggad som ${currentUser?.name || '...'}</div>
+          <div class="header-subtitle">Inloggad som ${escapeHtml(currentUser?.name || '...')}</div>
         </div>
         <div class="header-actions">
           <button class="header-btn" id="settings-btn" title="Inställningar">⚙️</button>
@@ -135,7 +137,7 @@ export function renderChatList(container) {
     if (!name) return;
     store.pairWithUser(name);
     pairDialog.style.display = 'none';
-    window.showToast?.(`🔗 Kopplad med ${name}!`);
+    showToast(`🔗 Kopplad med ${name}!`);
     // No setTimeout re-render – chatsUpdated event handles it
   }
 
@@ -190,12 +192,12 @@ function renderChatItem(chat) {
   return `
     <div class="chat-item" data-chat-id="${chat.id}">
       <div class="chat-item-avatar ${chat.otherUser?.avatarClass || 'gradient-1'}">
-        ${chat.otherUser?.name?.[0]?.toUpperCase() || '?'}
+        ${escapeHtml(chat.otherUser?.name?.[0]?.toUpperCase() || '?')}
         ${hasUnread ? `<div class="chat-item-badge">${chat.unreadCount}</div>` : ''}
       </div>
       <div class="chat-item-content">
         <div class="chat-item-header">
-          <span class="chat-item-name">${chat.otherUser?.name || 'Unknown'}</span>
+          <span class="chat-item-name">${escapeHtml(chat.otherUser?.name || 'Unknown')}</span>
           <span class="chat-item-time ${hasUnread ? 'has-unread' : ''}">
             ${lastMsg ? formatTime(lastMsg.timestamp) : ''}
           </span>

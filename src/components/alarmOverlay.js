@@ -3,6 +3,8 @@
 // ============================================
 
 import { store } from '../store.js';
+import { escapeHtml } from '../utils/html.js';
+import { showToast } from '../utils/toast.js';
 import { startAlarm, stopAlarm } from '../utils/alarm.js';
 
 let currentAlarmMessage = null;
@@ -18,7 +20,7 @@ export function showAlarmOverlay(message) {
     <div class="alarm-bg"></div>
     <div class="alarm-content">
       <div class="alarm-icon">🔔</div>
-      <div class="alarm-from">ALARM FRÅN ${sender?.name || 'Okänd'}</div>
+      <div class="alarm-from">ALARM FRÅN ${escapeHtml(sender?.name || 'Okänd')}</div>
       <div class="alarm-text">${escapeHtml(message.text)}</div>
       <div class="alarm-buttons">
         <button class="alarm-btn silence" id="alarm-silence">
@@ -71,21 +73,4 @@ export function isAlarmActive() {
   return currentAlarmMessage !== null;
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
 
-function showToast(message) {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = message;
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.classList.add('out');
-    setTimeout(() => toast.remove(), 200);
-  }, 2000);
-}

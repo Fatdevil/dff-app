@@ -6,11 +6,17 @@
 import { io } from 'socket.io-client';
 
 // ========== Socket Connection ==========
-const socket = io(window.location.origin, {
-  autoConnect: false,
-  reconnection: true,
-  reconnectionDelay: 1000,
-});
+// Token passed in auth handshake for server-side authentication (P0 #2)
+function createSocket() {
+  const token = localStorage.getItem('dff-token');
+  return io(window.location.origin, {
+    autoConnect: false,
+    reconnection: true,
+    reconnectionDelay: 1000,
+    auth: token ? { token } : {},
+  });
+}
+let socket = createSocket();
 
 class Store {
   constructor() {
@@ -78,7 +84,25 @@ class Store {
       },
     };
 
+    this._loadSettings();
     this._setupSocketListeners();
+  }
+
+  // --- Settings Persistence ---
+  _loadSettings() {
+    try {
+      const saved = localStorage.getItem('dff-settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        Object.assign(this.settings, parsed);
+      }
+    } catch { /* ignore corrupt settings */ }
+  }
+
+  _saveSettings() {
+    try {
+      localStorage.setItem('dff-settings', JSON.stringify(this.settings));
+    } catch { /* storage full – ignore */ }
   }
 
   // --- Event System ---
@@ -221,6 +245,7 @@ class Store {
   setTheme(themeName) {
     this.settings.theme = themeName;
     this.applyTheme();
+    this._saveSettings();
     this.emit('themeChanged', themeName);
   }
 
@@ -229,6 +254,7 @@ class Store {
     if (this.settings.theme === 'custom') {
       this.applyTheme();
     }
+    this._saveSettings();
   }
 
   applyTheme() {
@@ -335,6 +361,10 @@ class Store {
         localStorage.setItem('dff-email', email);
         this.currentUserId = data.user.id;
         this.currentUserName = data.user.name;
+        // Reconnect socket with new token in auth handshake
+        socket.disconnect();
+        socket = createSocket();
+        this._setupSocketListeners();
         socket.connect();
         socket.emit('login', { token: data.token, displayName: data.user.name });
       }

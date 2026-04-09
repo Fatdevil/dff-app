@@ -4,6 +4,7 @@
 
 import { store } from '../store.js';
 import { formatDuration } from '../utils/time.js';
+import { showToast } from '../utils/toast.js';
 
 const SNOOZE_OPTIONS = [
   { label: '5 min', ms: 5 * 60 * 1000 },
@@ -114,15 +115,4 @@ export function hideSnoozeDialog() {
   currentMessageId = null;
 }
 
-function showToast(message) {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = message;
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.classList.add('out');
-    setTimeout(() => toast.remove(), 200);
-  }, 2000);
-}
+

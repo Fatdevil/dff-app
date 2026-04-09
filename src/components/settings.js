@@ -3,6 +3,7 @@
 // ============================================
 
 import { store } from '../store.js';
+import { escapeHtml } from '../utils/html.js';
 
 export function renderSettings(container) {
   const s = store.settings;
@@ -112,8 +113,8 @@ export function renderSettings(container) {
         <div class="settings-group">
           <div class="settings-group-title">Konto</div>
           <div class="settings-item" id="switch-account">
-            <span class="settings-item-label">👤 ${currentUser?.name || ''}</span>
-            <span style="color: var(--text-tertiary); font-size:13px;">${currentEmail}</span>
+            <span class="settings-item-label">👤 ${escapeHtml(currentUser?.name || '')}</span>
+            <span style="color: var(--text-tertiary); font-size:13px;">${escapeHtml(currentEmail)}</span>
           </div>
           <div class="settings-item" id="logout-btn" style="cursor:pointer;">
             <span class="settings-item-label" style="color: var(--color-alarm);">🚪 Logga ut</span>

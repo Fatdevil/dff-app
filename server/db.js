@@ -285,3 +285,24 @@ export function rowToUser(row) {
   if (!row) return null;
   return { id: row.id, email: row.email, name: row.name, emoji: row.emoji, avatarClass: row.avatar_class };
 }
+
+// ========== P0 #5: Hämta meddelanden per status (för timer-återställning) ==========
+export async function getMessagesByStatus(status) {
+  const rows = await query(
+    USE_PG
+      ? 'SELECT * FROM messages WHERE status = $1 ORDER BY timestamp ASC'
+      : 'SELECT * FROM messages WHERE status = ? ORDER BY timestamp ASC',
+    [status]
+  );
+  return rows.map(rowToMessage);
+}
+
+// ========== P1 #9: Health check – verifiera DB-anslutning ==========
+export async function healthCheck() {
+  try {
+    await queryOne('SELECT 1 AS ok');
+    return true;
+  } catch {
+    return false;
+  }
+}
